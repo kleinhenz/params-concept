@@ -1,16 +1,19 @@
-#include <array>
-#include <tuple>
+#include <boost/hana.hpp>
+#include <boost/lexical_cast.hpp>
 #include <boost/preprocessor.hpp>
 #include <iostream>
 #include <string>
+#include <vector>
 
 template <typename T> struct parameter {
-  parameter(T val, std::string name, std::string help)
-      : val(val), name(name), help(help) {}
+  using value_type = T;
+  parameter(T val, std::string help) : val(val), help(help) {}
   operator T() const { return val; }
-  parameter &operator=(const T &x) { val = x; return *this;}
+  parameter &operator=(const T &x) {
+    val = x;
+    return *this;
+  }
   T val;
-  const std::string name;
   const std::string help;
 };
 
@@ -19,62 +22,82 @@ template <typename T> struct parameter {
 
 #define DEFINE_PARAMETERS_STRUCT_IMPL(name, members_seq)                       \
   struct name {                                                                \
-    static constexpr size_t size = BOOST_PP_SEQ_SIZE(members_seq);             \
     GENERATE_MEMBERS(members_seq)                                              \
+    bool help_requested = false;                                               \
   };                                                                           \
-  template <size_t I> auto &get(name &x);                                      \
-  GENERATE_GETS(name, members_seq);
+  BOOST_HANA_ADAPT_STRUCT(name, BOOST_PP_SEQ_ENUM(PARAM_NAME_SEQ(members_seq)))
 
-#define PARAM_TYPE_SEQ(members_seq) \
-  BOOST_PP_SEQ_TRANSFORM(PARAM_TYPE_SEQ_OP,_,members_seq)
+#define PARAM_NAME_SEQ(members_seq)                                            \
+  BOOST_PP_SEQ_TRANSFORM(PARAM_NAME_SEQ_OP, , members_seq)
 
-#define PARAM_TYPE_SEQ_OP(s, data, member) \
-  PARAM_TYPE(member)
+#define PARAM_NAME_SEQ_OP(s, data, member) PARAM_NAME(member)
 
 #define PARAM_TYPE(member) BOOST_PP_TUPLE_ELEM(0, member)
 #define PARAM_NAME(member) BOOST_PP_TUPLE_ELEM(1, member)
 #define PARAM_DEFAULT(member) BOOST_PP_TUPLE_ELEM(2, member)
 #define PARAM_HELP(member) BOOST_PP_TUPLE_ELEM(3, member)
 
-#define PARAM_NAME_STR(member) BOOST_PP_STRINGIZE(PARAM_NAME(member))
-
 #define GENERATE_MEMBERS(members_seq)                                          \
   BOOST_PP_SEQ_FOR_EACH(GENERATE_MEMBER, , members_seq)
 
 #define GENERATE_MEMBER(r, data, member)                                       \
-  parameter<PARAM_TYPE(member)> PARAM_NAME(member) = {                         \
-      PARAM_DEFAULT(member), PARAM_NAME_STR(member), PARAM_HELP(member)};
+  parameter<PARAM_TYPE(member)> PARAM_NAME(member) = {PARAM_DEFAULT(member),   \
+                                                      PARAM_HELP(member)};
 
-#define GENERATE_GETS(name, members_seq)                                       \
-  BOOST_PP_SEQ_FOR_EACH_I(GENERATE_GET, name, members_seq)
-
-#define GENERATE_GET(r, name, i, member)                                       \
-  template <> auto &get<i>(name & x) { return x.PARAM_NAME(member); }
-
-DEFINE_PARAMETERS_STRUCT(Parameters,
-                         (int, i, 0, "integer"),
-                         (std::string, name, "output", "output file"))
-
-template<class F>
-void for_each_impl(Parameters &p, F&& f, std::integral_constant<size_t, Parameters::size-1>){
-  f(get<Parameters::size-1>(p));
+template <class T> void print_help(const T &params) {
+  boost::hana::for_each(params, [](auto pair) {
+    std::cout << "--" << boost::hana::to<const char *>(boost::hana::first(pair))
+              << " arg (=" << boost::hana::second(pair).val << ") "
+              << boost::hana::second(pair).help << "\n";
+  });
 }
 
-template<size_t N, class F>
-void for_each_impl(Parameters &p, F&& f, std::integral_constant<size_t, N>){
-  f(get<N>(p));
-  for_each_impl(p, std::forward<F>(f), std::integral_constant<size_t, N+1>{});
+template <class T> void print_values(const T &params) {
+  boost::hana::for_each(params, [](auto pair) {
+    std::cout << boost::hana::to<const char *>(boost::hana::first(pair))
+              << " : " << boost::hana::second(pair).val << "\n";
+  });
 }
 
-template<class F>
-void for_each(Parameters &p, F&& f) {
-  for_each_impl(p, std::forward<F>(f), std::integral_constant<size_t, 0>{});
+template <class T> void parse_params(int argc, char *argv[], T &params) {
+  std::vector<std::string> args;
+  for (int i = 1; i < argc; ++i) {
+    args.emplace_back(argv[i]);
+  }
+  if (std::find(args.begin(), args.end(), "--help") != args.end()) {
+    params.help_requested = true;
+    return;
+  }
+
+  boost::hana::for_each(boost::hana::accessors<T>(), [&args,
+                                                      &params](auto &&pair) {
+    auto name = boost::hana::to<const char *>(boost::hana::first(pair));
+    auto &member = boost::hana::second(pair)(params);
+
+    std::string arg_str("--");
+    arg_str += name;
+
+    for (int i = 0; i < args.size(); ++i) {
+      if (args[i] == arg_str) {
+        member.val = boost::lexical_cast<
+            typename std::decay_t<decltype(member)>::value_type>(args[i + 1]);
+      }
+    }
+  });
 }
 
-auto print_params = [](auto p){std::cout << p.name << " = " << p.val << "\n";};
-auto print_help = [](auto p){std::cout << "  --" << p.name << " arg (=" << p.val << ") " << "\"" << p.help << "\"\n";};
+DEFINE_PARAMETERS_STRUCT(Parameters, (int, i, 0, "integer"),
+                         (std::string, name, "output", "output file"));
 
 int main(int argc, char *argv[]) {
   Parameters p;
-  for_each(p, print_help);
+  parse_params(argc, argv, p);
+
+  if (p.help_requested) {
+    print_help(p);
+    return -1;
+  }
+
+  print_values(p);
+  return 0;
 }
