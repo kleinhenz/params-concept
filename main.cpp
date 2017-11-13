@@ -8,6 +8,7 @@ template <typename T> struct parameter {
   parameter(T val, std::string name, std::string help)
       : val(val), name(name), help(help) {}
   operator T() const { return val; }
+  parameter &operator=(const T &x) { val = x; return *this;}
   T val;
   const std::string name;
   const std::string help;
@@ -51,12 +52,29 @@ template <typename T> struct parameter {
   template <> auto &get<i>(name & x) { return x.PARAM_NAME(member); }
 
 DEFINE_PARAMETERS_STRUCT(Parameters,
-                         (int, i, 0, "i param"),
-                         (int, j, 1, "j param"))
+                         (int, i, 0, "integer"),
+                         (std::string, name, "output", "output file"))
+
+template<class F>
+void for_each_impl(Parameters &p, F&& f, std::integral_constant<size_t, Parameters::size-1>){
+  f(get<Parameters::size-1>(p));
+}
+
+template<size_t N, class F>
+void for_each_impl(Parameters &p, F&& f, std::integral_constant<size_t, N>){
+  f(get<N>(p));
+  for_each_impl(p, std::forward<F>(f), std::integral_constant<size_t, N+1>{});
+}
+
+template<class F>
+void for_each(Parameters &p, F&& f) {
+  for_each_impl(p, std::forward<F>(f), std::integral_constant<size_t, 0>{});
+}
+
+auto print_params = [](auto p){std::cout << p.name << " = " << p.val << "\n";};
+auto print_help = [](auto p){std::cout << "  --" << p.name << " arg (=" << p.val << ") " << "\"" << p.help << "\"\n";};
 
 int main(int argc, char *argv[]) {
   Parameters p;
-
-  std::cout << "i = " << get<0>(p) << "\n";
-  std::cout << "j = " << get<1>(p) << "\n";
+  for_each(p, print_help);
 }
