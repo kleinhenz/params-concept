@@ -1,5 +1,6 @@
 #include "params.hpp"
 
+// takes name and list of tuples of form (type, name, default, help)
 DEFINE_PARAMETERS_STRUCT(Parameters, (int, i, 0, "integer"),
                          (std::string, name, "output", "output file"));
 

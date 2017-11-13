@@ -85,4 +85,3 @@ template <class T> void parse_params(int argc, char *argv[], T &params) {
     }
   });
 }
-
