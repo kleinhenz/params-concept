@@ -2,17 +2,26 @@
 
 // takes name and list of tuples of form (type, name, default, help)
 DEFINE_PARAMETERS_STRUCT(Parameters, (int, i, 0, "integer"),
-                         (std::string, name, "output", "output file"));
+                         (std::string, name, "output", "output file"),
+                         (bool, help, false, "print help")
+                         );
 
 int main(int argc, char *argv[]) {
   Parameters p;
-  parse_params(argc, argv, p);
 
-  if (p.help_requested) {
-    print_help(p);
+  try {
+    parse_params(argc, argv, p);
+  } catch (std::exception& e) {
+    std::cout << "error: " << e.what() << "\n";
     return -1;
   }
 
-  print_values(p);
+  if (p.help) {
+    print_desc(std::cout, p);
+    return -1;
+  }
+
+  print_values(std::cout, p);
+
   return 0;
 }
